@@ -37,7 +37,9 @@ model_list:
           MEDIUM:
             - anthropic/claude-sonnet-5
           COMPLEX:
-            - anthropic/claude-opus-5
+            - model_name: anthropic/claude-opus-5
+              litellm_params:
+                reasoning_effort: high
           REASONING:
             - anthropic/claude-fable-5-1
 
@@ -65,7 +67,9 @@ model_list:
           MEDIUM:
             - anthropic/claude-sonnet-5
           COMPLEX:
-            - anthropic/claude-opus-5
+            - model_name: anthropic/claude-opus-5
+              litellm_params:
+                reasoning_effort: high
           REASONING:
             - anthropic/claude-fable-5-1
 
