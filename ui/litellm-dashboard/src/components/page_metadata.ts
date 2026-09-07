@@ -20,6 +20,7 @@ export const pageDescriptions: Record<string, string> = {
   "vector-stores": "Manage vector databases for embeddings",
   new_usage: "View usage analytics and metrics",
   "cost-optimization": "Track and configure cost-saving features: prompt compression, caching, and auto routing",
+  "autorouter-learnings": "View and clear what moe-learning-router has learned from strong-tier responses",
   logs: "Access request and response logs",
   "guardrails-monitor": "Monitor guardrail performance and view logs",
   users: "Manage internal user accounts and permissions",

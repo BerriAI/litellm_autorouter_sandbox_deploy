@@ -8022,6 +8022,47 @@ export const listMCPUserEnvVarStatus = async (accessToken: string): Promise<MCPU
  */
 const encodeMemoryKeyForPath = (key: string): string => key.split("/").map(encodeURIComponent).join("/");
 
+export interface AutorouterLearning {
+  name: string;
+  content: string;
+}
+
+export interface AutorouterLearningsResponse {
+  store_dir: string;
+  count: number;
+  learnings: AutorouterLearning[];
+}
+
+export const fetchAutorouterLearnings = async (accessToken: string): Promise<AutorouterLearningsResponse> => {
+  const url = proxyBaseUrl ? `${proxyBaseUrl}/autorouter/memory` : `/autorouter/memory`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      [globalLitellmHeaderName]: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+};
+
+export const clearAutorouterLearnings = async (accessToken: string): Promise<{ deleted: number }> => {
+  const url = proxyBaseUrl ? `${proxyBaseUrl}/autorouter/memory` : `/autorouter/memory`;
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      [globalLitellmHeaderName]: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+};
+
 export interface MemoryRow {
   memory_id: string;
   key: string;

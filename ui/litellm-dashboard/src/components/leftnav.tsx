@@ -215,6 +215,13 @@ const menuGroups: MenuGroup[] = [
           </span>
         ),
       },
+      {
+        key: "autorouter-learnings",
+        page: "autorouter-learnings",
+        icon: <FlaskConical {...ICON} />,
+        roles: [...all_admin_roles, ...internalUserRoles],
+        label: "Autorouter Learnings",
+      },
       { key: "logs", page: "logs", label: "Logs", icon: <Activity {...ICON} /> },
       {
         key: "guardrails-monitor",
