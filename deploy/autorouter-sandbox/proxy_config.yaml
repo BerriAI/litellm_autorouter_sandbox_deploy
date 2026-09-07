@@ -1,3 +1,13 @@
+guardrails:
+  - guardrail_name: memory-learnings
+    litellm_params:
+      guardrail: memory_guardrail.MemoryGuardrail
+      mode: pre_call
+  - guardrail_name: memory-learnings
+    litellm_params:
+      guardrail: memory_guardrail.MemoryGuardrail
+      mode: post_call
+
 model_list:
   - model_name: "*"
     litellm_params:
@@ -8,6 +18,8 @@ model_list:
   - model_name: moe-router
     litellm_params:
       model: auto_router/complexity_router
+      guardrails:
+        - memory-learnings
       complexity_router_default_model: anthropic/claude-sonnet-5
       complexity_router_config:
         classifier_type: llm

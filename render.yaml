@@ -8,6 +8,10 @@ services:
     dockerfilePath: ./deploy/autorouter-sandbox/Dockerfile
     dockerContext: .
     healthCheckPath: /health/liveliness
+    disk:
+      name: autorouter-sandbox-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PORT
         value: "4000"
@@ -17,3 +21,5 @@ services:
         sync: false
       - key: LITELLM_MASTER_KEY
         generateValue: true
+      - key: MEMORY_STORE_DIR
+        value: /var/data/memory

@@ -9,5 +9,6 @@ COPY litellm-proxy-extras/litellm_proxy_extras/ ${SITE_PACKAGES}/litellm_proxy_e
 COPY litellm-proxy-extras/ /app/litellm-proxy-extras/
 COPY schema.prisma /app/schema.prisma
 COPY deploy/autorouter-sandbox/proxy_config.yaml /app/config.yaml
+COPY deploy/autorouter-sandbox/memory_guardrail.py /app/memory_guardrail.py
 
 CMD ["--config", "/app/config.yaml", "--port", "4000"]
