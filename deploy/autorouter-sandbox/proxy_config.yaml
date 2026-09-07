@@ -18,6 +18,32 @@ model_list:
   - model_name: moe-router
     litellm_params:
       model: auto_router/complexity_router
+      complexity_router_default_model: anthropic/claude-opus-5
+      complexity_router_config:
+        classifier_type: llm
+        classifier_llm_config:
+          model: anthropic/claude-haiku-4-5
+          timeout_ms: 3000
+          classification_rubric: agentic
+        classifier_context_window_size: 35
+        classifier_context_per_turn_chars: 500
+        deployment_affinity: true
+        session_affinity: false
+        escalation_keywords:
+          - LITELLM ESCALATE
+        tiers:
+          SIMPLE:
+            - anthropic/claude-haiku-4-5
+          MEDIUM:
+            - anthropic/claude-sonnet-5
+          COMPLEX:
+            - anthropic/claude-opus-5
+          REASONING:
+            - anthropic/claude-fable-5-1
+
+  - model_name: moe-learning-router
+    litellm_params:
+      model: auto_router/complexity_router
       guardrails:
         - memory-learnings
       complexity_router_default_model: anthropic/claude-opus-5
