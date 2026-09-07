@@ -20,6 +20,30 @@ see what follows
 Demoed both ways in `main()`: a message-by-message live path over wire-shaped messages, and a
 full replay of the session trace comparing online against post hoc
 
+## Config: debounce=2, OTHER phase-neutral
+
+Judged by reading the detected boundaries against what actually happened in a 93-call session
+(the trace is that session, extended as it went)
+
+`debounce=3` is wrong: 6 boundaries, and it misses entire real work cycles. No explore ->
+implement when the endpoint got written, no implement -> verify on the crash debug, nothing for
+the UI build cycle. Those are exactly the transitions worth routing on, so smoothing them away
+defeats the point
+
+`debounce=2` catches the real cycles, but 6 of its 16 boundaries were transitions into or out of
+`OTHER`, which is the catch-all for calls that match no keyword: git commits, cleanup, and (a
+classifier gap) `python3 <script>.py`, which is plainly verification. Each commit fired two
+boundaries, one leaving work and one returning, churning the tier twice for no routing benefit
+
+Fix is semantic, not a tuning hack. `OTHER` means "this call carries no phase signal," so it
+should neither confirm a new phase nor break the current run. `replay_online(skip_neutral=True)`
+drops those before the state machine sees them. Result: 14 boundaries, every one a genuine
+explore/implement/verify switch, verified call by call against the session. Treating `OTHER` as
+a phase was the actual bug; `debounce=3` was compensating for it by discarding real signal
+
+Boundary indices are remapped back to the original trace, so `lag` counts real elapsed calls
+including skipped neutral ones (mean 1.08, max 2)
+
 ## Online and post hoc agree exactly
 
 13 boundaries each, identical positions, mean detection lag 1.00 calls, zero disagreement

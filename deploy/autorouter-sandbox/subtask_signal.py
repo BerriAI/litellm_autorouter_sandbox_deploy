@@ -194,14 +194,36 @@ def advance(state: OnlineState, phase: Phase, debounce: int = 2) -> tuple[Online
     return OnlineState(confirmed=state.confirmed, pending=phase, pending_run=run, seen=index + 1), None
 
 
-def replay_online(trace: Sequence[ToolCall], debounce: int = 2) -> tuple[OnlineBoundary, ...]:
-    """Feed a trace through `advance` one call at a time, exactly as the live path would."""
+def replay_online(trace: Sequence[ToolCall], debounce: int = 2, skip_neutral: bool = True) -> tuple[OnlineBoundary, ...]:
+    """Feed a trace through `advance` one call at a time, exactly as the live path would.
+
+    `skip_neutral` drops OTHER calls before they reach the state machine. OTHER is the
+    catch-all for "this call carries no phase signal" (a git commit, a cleanup), and a call
+    with no signal should neither confirm a new phase nor break the current run. Letting it
+    act as a phase was making commits fire two boundaries, one in and one back out, churning
+    the tier for no routing benefit.
+
+    Boundary indices are remapped back to positions in the original `trace`, so `lag` counts
+    real elapsed calls including any neutral ones that were skipped.
+    """
     state = OnlineState()  # rebind-ok: fold over the trace, each step depends on the previous
     events: list[OnlineBoundary] = []  # mutable-ok: append-only accumulator over one forward pass
-    for call in trace:
-        state, boundary = advance(state, classify_tool_call(call), debounce)
+    signal_positions: list[int] = []  # mutable-ok: same, maps filtered index -> original index
+    for original_index, call in enumerate(trace):
+        phase = classify_tool_call(call)
+        if skip_neutral and phase is Phase.OTHER:
+            continue
+        signal_positions.append(original_index)
+        state, boundary = advance(state, phase, debounce)
         if boundary is not None:
-            events.append(boundary)
+            events.append(
+                OnlineBoundary(
+                    started_at=signal_positions[boundary.started_at],
+                    detected_at=signal_positions[boundary.detected_at],
+                    from_phase=boundary.from_phase,
+                    to_phase=boundary.to_phase,
+                )
+            )
     return tuple(events)
 
 
@@ -317,6 +339,33 @@ _THIS_SESSION_TRACE: Final = (
     ToolCall("Read", "proxy_config.yaml"),
     ToolCall("Edit", "proxy_config.yaml COMPLEX to opus-5 high"),
     ToolCall("Bash", "git add commit push"),
+    # Terminal-Bench question, then the subtask-signal build itself.
+    ToolCall("WebSearch", "terminal-bench 2.1 details"),
+    ToolCall("WebSearch", "terminal-bench litellm proxy wiring"),
+    ToolCall("Write", "subtask_signal.py post-hoc detector"),
+    ToolCall("Bash", "python3 subtask_signal.py first run"),
+    ToolCall("Write", "experiments/subtask_signal.md"),
+    ToolCall("Bash", "git add commit push subtask signal"),
+    ToolCall("Bash", "grep RoutingPlugin RoutingContext types/router.py"),
+    ToolCall("Bash", "grep tool_calls complexity_router.py"),
+    ToolCall("Read", "complexity_router.py:579 newest_turn_is_human_ask"),
+    ToolCall("Bash", "grep plugins invocation sites complexity_router.py"),
+    ToolCall("Edit", "subtask_signal.py add advance/OnlineState/extract_tool_calls"),
+    ToolCall("Edit", "subtask_signal.py imports Mapping/Any"),
+    ToolCall("Edit", "subtask_signal.py online vs posthoc comparison in main"),
+    ToolCall("Bash", "python3 subtask_signal.py online comparison"),
+    ToolCall("Edit", "subtask_signal.py add wire-format live demo"),
+    ToolCall("Bash", "python3 subtask_signal.py live path"),
+    ToolCall("Edit", "subtask_signal.py fix duplicate confirmed tag"),
+    ToolCall("Bash", "python3 subtask_signal.py verify fix"),
+    ToolCall("Bash", "python3 subtask_signal.py tail check"),
+    ToolCall("Edit", "experiments/subtask_signal.md online section"),
+    ToolCall("Bash", "grep stray CJK char in md"),
+    ToolCall("Edit", "experiments/subtask_signal.md fix stray char"),
+    ToolCall("Bash", "git add commit push online detector"),
+    ToolCall("Bash", "python3 -c debounce sweep 1-4"),
+    ToolCall("Bash", "python3 -c debounce transitions"),
+    ToolCall("Bash", "python3 -c check trace length"),
 )
 
 
@@ -370,7 +419,7 @@ def main() -> None:
     online: Final = replay_online(_THIS_SESSION_TRACE, debounce=2)
     posthoc: Final = detect_boundaries(classified, debounce=2)
 
-    print("=== ONLINE (decided live, one call at a time, no lookahead) ===\n")
+    print("=== ONLINE, OTHER phase-neutral (the shipping config) ===\n")
     detected_at: Final = {b.detected_at: b for b in online}
     for i, c in enumerate(classified):
         marker = ""
@@ -380,19 +429,18 @@ def main() -> None:
             marker = f"   <== BOUNDARY {origin} -> {b.to_phase.value} (began at [{b.started_at}], lag {b.lag})"
         print(f"[{i:>3}] {c.phase.value:<9} {c.call.name}{marker}")
 
+    noisy: Final = replay_online(_THIS_SESSION_TRACE, debounce=2, skip_neutral=False)
     print(f"\n{len(classified)} tool calls")
-    print(f"online:  {len(online)} boundaries")
-    print(f"posthoc: {len(posthoc)} boundaries")
+    print(f"OTHER neutral:    {len(online)} boundaries  (every one a real explore/implement/verify switch)")
+    print(f"OTHER as a phase: {len(noisy)} boundaries  (adds git-commit churn: fires leaving work, fires again returning)")
 
-    online_starts: Final = {b.started_at for b in online}
-    posthoc_starts: Final = {b.index for b in posthoc}
-    print(f"\nagreed on:      {sorted(online_starts & posthoc_starts)}")
-    print(f"online only:    {sorted(online_starts - posthoc_starts)}")
-    print(f"posthoc only:   {sorted(posthoc_starts - online_starts)}")
+    churn: Final = tuple(b for b in noisy if Phase.OTHER in (b.from_phase, b.to_phase))
+    print(f"  of those, {len(churn)} are transitions into or out of OTHER, i.e. tier changes with no routing benefit")
 
     lags: Final = tuple(b.lag for b in online if b.from_phase is not None)
     if lags:
         print(f"\ndetection lag: min {min(lags)}, max {max(lags)}, mean {sum(lags) / len(lags):.2f} calls")
+    print(f"posthoc (legacy, OTHER as a phase): {len(posthoc)} boundaries")
 
 
 if __name__ == "__main__":
