@@ -29,6 +29,7 @@ from litellm.router_strategy.complexity_router.complexity_router import (
     _extract_current_ask_and_system_prompt,
 )
 from litellm.types.utils import CallTypesLiteral
+from litellm.utils import token_counter
 
 _STRONG_TIERS: Final = frozenset({"COMPLEX", "REASONING"})
 _STORE_DIR: Final = Path(os.environ.get("MEMORY_STORE_DIR", "/tmp/memory"))
@@ -73,15 +74,21 @@ class MemoryGuardrail(CustomGuardrail):
                 return data
 
             coverage = self._estimate_coverage(current_ask, candidates)
-            injected = self._inject_into_turn(messages, candidates)
-            if injected is not None:
-                data["messages"] = injected
+            injection_result = self._inject_into_turn(messages, candidates)
 
             metadata_key = "litellm_metadata" if "litellm_metadata" in data else "metadata"
             metadata = data.setdefault(metadata_key, {})
             if isinstance(metadata, dict):
                 metadata["memory_coverage"] = coverage
-                metadata["memory_injected"] = injected is not None
+                metadata["memory_injected"] = injection_result is not None
+                if injection_result is not None:
+                    injected_messages, injected_text = injection_result
+                    data["messages"] = injected_messages
+                    # Savings baseline prices the whole request against the counterfactual
+                    # model, so without this the baseline gets billed for tokens it would
+                    # never have needed: see experiments/memory.md, "Injected tokens inflate
+                    # the savings baseline".
+                    metadata["memory_injected_tokens"] = token_counter(text=injected_text)
 
             return data
         except Exception as e:
@@ -155,11 +162,16 @@ class MemoryGuardrail(CustomGuardrail):
 
     def _inject_into_turn(
         self, messages: list[dict[str, Any]], learnings: tuple[str, ...]
-    ) -> Optional[list[dict[str, Any]]]:
+    ) -> Optional[tuple[list[dict[str, Any]], str]]:
         """Prepend learnings to the last user turn, not the system prompt: the system
         prompt is Claude Code's most-cached prefix, so injecting there would invalidate
-        the cache on every turn. The current turn sits after every cache breakpoint."""
+        the cache on every turn. The current turn sits after every cache breakpoint.
+
+        Returns the injected text alongside the messages so the caller can price it out
+        of the savings baseline: see experiments/memory.md, "Injected tokens inflate the
+        savings baseline"."""
         injection = "\n\n".join(learnings)
+        injected_text = f"[Learned context]\n{injection}\n\n[Current ask]\n"
         messages_copy = [dict(msg) for msg in messages]
 
         for msg in reversed(messages_copy):
@@ -168,16 +180,16 @@ class MemoryGuardrail(CustomGuardrail):
 
             content = msg.get("content")
             if isinstance(content, str):
-                msg["content"] = f"[Learned context]\n{injection}\n\n[Current ask]\n{content}"
-                return messages_copy
+                msg["content"] = f"{injected_text}{content}"
+                return messages_copy, injected_text
 
             if isinstance(content, list):
                 new_content = [dict(block) if isinstance(block, dict) else block for block in content]
                 for block in new_content:
                     if isinstance(block, dict) and block.get("type") == "text":
-                        block["text"] = f"[Learned context]\n{injection}\n\n[Current ask]\n{block.get('text', '')}"
+                        block["text"] = f"{injected_text}{block.get('text', '')}"
                         msg["content"] = new_content
-                        return messages_copy
+                        return messages_copy, injected_text
 
         return None
 

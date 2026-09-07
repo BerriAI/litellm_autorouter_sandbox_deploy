@@ -1,6 +1,7 @@
 # Experiment 1: learned-coverage routing
 
-Status: spec, not built
+Status: built. Lives on `moe-learning-router`, a separate model name from plain `moe-router`
+so the two are a clean A/B: same tiers and classifier, memory guardrail only on the second
 
 ## Hypothesis
 
@@ -146,6 +147,49 @@ classifier is the real filter; the first-stage retrieval can be dumb without hur
 Delayed payoff. There is nothing to cash in until learnings accumulate, and the article's whole
 thesis is about repeat attempts. A day of real coding may not repeat a task, so the earliest
 honest read on cross-session value is tomorrow
+
+## Caveats (known-wrong numbers, sharp edges)
+
+Running list of things that are true about this build right now and would mislead anyone
+reading a dashboard or a header without knowing them. Add to this whenever a new one turns up
+rather than fixing it silently; each entry says whether it is fixed, and where
+
+**Injected tokens inflate the savings baseline.** `compute_autorouter_savings`
+(`litellm/proxy/spend_tracking/savings.py`) prices the request's actual token count against the
+counterfactual baseline model. When the guardrail injects learnings, those extra tokens get
+priced on the baseline side too, i.e. "what would REASONING have cost to read tokens it would
+never have needed," since injection only exists to make the cheap model viable. The dashboard's
+autorouter-savings figure is therefore inflated for `moe-learning-router` specifically, and the
+inflation grows with how much gets injected. Direction of the error is flattering, which is the
+kind that goes unnoticed
+  - Status: not fixed in the core driver (deliberately, see below). The guardrail now records
+    `memory_injected_tokens` in request metadata (`memory_guardrail.py`, `_inject_into_turn`),
+    so the raw number needed to correct a reading is available; there is no corrected figure
+    computed or surfaced anywhere yet
+  - Deliberately not patching `litellm/proxy/spend_tracking/savings.py`: that file is shared by
+    every autorouter user, and correcting it properly means threading a new field through four
+    or five functions. Sandbox-only fix for now, matching "iterate fast, rewrite what's worth
+    keeping later." Revisit if this experiment survives past today
+  - Until fixed: read the two routers' dashboards against each other rather than trusting either
+    absolute number. `moe-router`'s savings figure is accurate; `moe-learning-router`'s is an
+    upper bound
+
+**No cross-user, cross-session, or cross-tier scoping on the learning store.** One flat directory
+under `MEMORY_STORE_DIR`, shared by every request that hits `moe-learning-router`, retrieved by
+plain keyword overlap regardless of who wrote the learning, what session it came from, or what
+tier is currently being served. If anyone else points a Claude Code session at this deploy
+tonight, they read and write the same store you do
+  - Status: not fixed, deliberately out of scope for now (see "Deliberately not doing yet" above,
+    "Cross-user pooling")
+
+**Classifier fallback changed the savings baseline as a side effect.** The savings baseline is
+derived as "the priciest model in the hardest configured tier"
+(`litellm/router_strategy/savings_baseline.py`), which is REASONING (`claude-fable-5-1`), not
+whatever model actually served the request one tier up. Any change to the REASONING tier or to
+`complexity_router_default_model` moves this baseline. The tier fix made 2026-09-07 (fable-5 to
+fable-5-1) already did this once; it will happen again on the next tier change, and is worth
+remembering when comparing savings figures across days
+  - Status: expected behavior, not a bug, just easy to forget when reading historical numbers
 
 ## How we will know it worked
 
