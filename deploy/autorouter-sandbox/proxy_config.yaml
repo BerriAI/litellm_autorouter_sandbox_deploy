@@ -20,11 +20,11 @@ model_list:
       model: auto_router/complexity_router
       guardrails:
         - memory-learnings
-      complexity_router_default_model: anthropic/claude-sonnet-5
+      complexity_router_default_model: anthropic/claude-opus-5
       complexity_router_config:
         classifier_type: llm
         classifier_llm_config:
-          model: openai/gpt-4o-mini
+          model: anthropic/claude-haiku-4-5
           timeout_ms: 3000
           classification_rubric: agentic
         classifier_context_window_size: 35
@@ -41,7 +41,7 @@ model_list:
           COMPLEX:
             - anthropic/claude-opus-5
           REASONING:
-            - anthropic/claude-fable-5
+            - anthropic/claude-fable-5-1
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
