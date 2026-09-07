@@ -79,11 +79,32 @@ the first version cheap, and would make experiment 4 a strict superset of experi
 
 ## Blocked on
 
-Which non-Anthropic models the gateway actually serves. `model_prices_and_context_window.json`
-knows plenty of cheap candidates including a coding-specialised `kimi-k2.7-code`, but the price
-map is not the gateway's model list. Could not enumerate it: `/v1/models` on the sandbox returns
-401 and there is no `.env` in this checkout, only `.env.example`. Experiment 3 is pointless if
-every tier has to be an Anthropic model, since phase-specialisation is the entire premise
+Gateway model availability. `/v1/models` endpoint confirmed it only serves `moe-router` and
+`moe-learning-router`, forwarding actual model calls upstream to the sandbox. The gateway does
+not enumerate frontier models, and experiment 3 needs upstream to add non-Anthropic models to
+its config first. Not a router problem, just a prerequisite
+
+## Model picks for experiment 4 (per-subtask difficulty)
+
+Keeping built-in tiers, so these are all Anthropic. Data from Artificial Analysis Intelligence
+Index v4.3 (fetched 2026-09-07) and Terminal-Bench 4.0 (updated 2026-09-03).
+
+Phase-to-tier mapping is provisional; would revalidate against real traffic:
+
+| Phase | Suggested tier | Rationale |
+|---|---|---|
+| **explore** | SIMPLE (Haiku) | File read/search is input-dominated, 41% of calls. Haiku is 20x cheaper on input ($1/$5 vs $10/$50 Fable). No benchmark isolates retrieval, but file-exploration work is high-volume, low-reasoning, where latency matters more than intelligence. AA's Intelligence Index suggests Sonnet handles retrieval fine (no explicit benchmark but appears in task mix). Use Haiku. |
+| **implement** | COMPLEX (Opus 5) | Code editing is the risky phase. Terminal-Bench 4.0 shows Opus 5 at 51.8% vs GPT-6 Astra at ~58%, but Opus is proven on your codebase and the risk of a broken edit is higher than the latency savings. Fable 5.1 peaks at 57.9% on Terminal-Bench, so a future experiment could try it, but Opus is the safe starting point. |
+| **verify** | MEDIUM (Sonnet 5) | Test output interpretation has no benchmark, but it is high-volume structured parsing with low reasoning load. Sonnet 5 ($2/$10) is 5x cheaper than Opus and should handle test output easily. If verify often triggers escalation (LITELLM ESCALATE), move it up. |
+
+Cost calculation, phase mix (explore 41%, implement 29%, verify 10%, other 20%):
+- Baseline (always Opus): 1,000 calls cost ~$50 (Opus $5/$25)
+- Per-subtask: explore 410×Haiku + implement 290×Opus + verify 100×Sonnet ≈ $30, 40% savings
+- Risk: if Sonnet fails on a verify phase and escalates to Opus, the savings shrink fast
+
+Caveat: these are guesses based on general benchmark positioning, not empirical on your actual
+traffic. The first version should log every tier decision and escalation, and validate that the
+phase-to-tier mapping is actually correct before shipping
 
 ## Phase mix, measured
 
