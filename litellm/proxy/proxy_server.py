@@ -489,6 +489,9 @@ from litellm.proxy.management_endpoints.coordination_redis_endpoints import (
 from litellm.proxy.management_endpoints.cost_tracking_settings import (
     router as cost_tracking_settings_router,
 )
+from litellm.proxy.autorouter_memory_endpoints import (
+    router as autorouter_memory_router,
+)
 from litellm.proxy.management_endpoints.customer_endpoints import (
     router as customer_router,
 )
@@ -18343,6 +18346,7 @@ app.include_router(team_router)
 app.include_router(ui_sso_router)
 app.include_router(organization_router)
 app.include_router(customer_router)
+app.include_router(autorouter_memory_router)
 app.include_router(management_v1_router)
 app.include_router(spend_management_router)
 app.include_router(caching_router)

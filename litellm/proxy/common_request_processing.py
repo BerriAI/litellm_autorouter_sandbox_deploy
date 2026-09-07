@@ -1408,6 +1408,18 @@ def _get_cost_breakdown_from_logging_obj(
     )
 
 
+def _memory_signal(request_data: Mapping[str, object] | None, key: str) -> str | None:
+    """A memory-guardrail signal recorded on the request, read from whichever metadata
+    bucket this route uses. Experiment instrumentation, see
+    deploy/autorouter-sandbox/experiments/memory.md."""
+    data: Final = request_data or {}
+    for metadata_key in ("litellm_metadata", "metadata"):
+        metadata = data.get(metadata_key)
+        if isinstance(metadata, dict) and key in metadata:
+            return str(metadata[key])
+    return None
+
+
 def _routing_decision_from_request_data(request_data: Mapping[str, object] | None) -> Mapping[str, object] | None:
     """The auto-router's routing_decision for this request, if a pre-routing hook recorded one.
 
@@ -1648,6 +1660,8 @@ class ProxyBaseLLMRequestProcessing:
             "x-litellm-classifier-cost": (str(classifier_cost) if classifier_cost is not None else None),
             "x-litellm-routing-tier": (routing_decision or {}).get("tier"),
             "x-litellm-routing-cause": (routing_decision or {}).get("cause"),
+            "x-litellm-memory-injected": _memory_signal(request_data, "memory_injected"),
+            "x-litellm-memory-coverage": _memory_signal(request_data, "memory_coverage"),
             "x-litellm-key-tpm-limit": str(user_api_key_dict.tpm_limit),
             "x-litellm-key-rpm-limit": str(user_api_key_dict.rpm_limit),
             "x-litellm-key-max-budget": str(user_api_key_dict.max_budget),

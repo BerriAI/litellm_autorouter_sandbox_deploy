@@ -31,6 +31,7 @@ from litellm.router_strategy.complexity_router.complexity_router import (
 from litellm.types.utils import CallTypesLiteral
 
 _STRONG_TIERS: Final = frozenset({"COMPLEX", "REASONING"})
+_STORE_DIR: Final = Path(os.environ.get("MEMORY_STORE_DIR", "/tmp/memory"))
 _MIN_WORD_LEN: Final = 4
 _MAX_CANDIDATES: Final = 3
 _FULL_COVERAGE_RATIO: Final = 0.7
@@ -48,7 +49,7 @@ class MemoryGuardrail(CustomGuardrail):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.store_dir: Final[Path] = Path(os.environ.get("MEMORY_STORE_DIR", "/tmp/memory"))
+        self.store_dir: Final[Path] = _STORE_DIR
         self.store_dir.mkdir(parents=True, exist_ok=True)
 
     async def async_pre_call_hook(
