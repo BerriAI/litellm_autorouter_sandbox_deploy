@@ -73,16 +73,49 @@ model_list:
           REASONING:
             - anthropic/claude-fable-5-1
 
-  - model_name: moe-phase-difficulty-router
+  # Experiment 3: model per subtask TYPE. Tier names are arbitrary slots here, not a
+  # difficulty ladder: SIMPLE is the explore model, COMPLEX the implement model, MEDIUM the
+  # verify model. Models are picked for the kind of work, not its hardness.
+  - model_name: moe-subtask-type-router
     litellm_params:
       model: auto_router/complexity_router
       complexity_router_default_model: anthropic/claude-opus-5
       complexity_router_config:
         classifier_type: custom
-        classifier_plugin: phase_difficulty_classifier.PhaseDifficultyClassifier
+        classifier_plugin: subtask_type_classifier.subtask_type_classifier
         classifier_plugin_timeout_ms: 500
         classifier_fallback: default_model
-        classification_mode: every_request
+        deployment_affinity: true
+        session_affinity: false
+        escalation_keywords:
+          - LITELLM ESCALATE
+        tiers:
+          # explore: long context and cheap input dominate; reading is not a reasoning task
+          SIMPLE:
+            - fireworks_ai/deepseek-v4-flash
+          # verify: parsing test output, wants fast and cheap over smart
+          MEDIUM:
+            - anthropic/claude-haiku-4-5
+          # implement: the one phase where a wrong answer is expensive
+          COMPLEX:
+            - model_name: anthropic/claude-opus-5
+              litellm_params:
+                reasoning_effort: high
+          # unused by this classifier; kept so manual LITELLM ESCALATE has somewhere to go
+          REASONING:
+            - anthropic/claude-fable-5-1
+
+  # Experiment 4: difficulty scored per subtask. Same built-in tiers as moe-router, so the
+  # comparison against it isolates "what got classified" rather than "which models exist".
+  - model_name: moe-subtask-difficulty-router
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_default_model: anthropic/claude-opus-5
+      complexity_router_config:
+        classifier_type: custom
+        classifier_plugin: phase_difficulty_classifier.phase_difficulty_classifier
+        classifier_plugin_timeout_ms: 500
+        classifier_fallback: default_model
         deployment_affinity: true
         session_affinity: false
         escalation_keywords:

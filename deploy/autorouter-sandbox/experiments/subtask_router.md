@@ -1,6 +1,52 @@
 # Experiments 3 and 4: routing on the subtask, not the ask
 
-Status: design verified against the code, models not yet picked, nothing built
+Status: both built and verified against a live proxy
+
+## The two are genuinely different, and an earlier version of this was not
+
+The first build of experiment 4 was a static `phase -> fixed tier` lookup with no difficulty
+assessment anywhere in it. That is experiment 3 wearing the built-in tier names as a costume,
+and the router name claiming "difficulty" was doing no work. Caught in review, rebuilt
+
+Verified live, same four fixtures through both routers:
+
+| fixture | by TYPE | by DIFFICULTY |
+|---|---|---|
+| tiny edit (1 file, 2 calls) | COMPLEX (opus-5) | MEDIUM (sonnet-5) |
+| big refactor (4 files, 8 calls) | COMPLEX (opus-5) | REASONING (fable-5-1) |
+| wide search (6 targets) | SIMPLE (deepseek-v4-flash) | MEDIUM |
+| verify passing | MEDIUM (haiku-4-5) | SIMPLE |
+
+The two implement rows are the point: identical phase, and the type router necessarily sends
+both to the same model while the difficulty router splits them two tiers apart
+
+## How the difficulty scoring works
+
+Phase sets a band, not an answer. Signals counted over the current subtask only (calls since
+the last confirmed boundary) move the tier inside that band, then it is clamped:
+
+    explore    SIMPLE..MEDIUM      start SIMPLE
+    implement  MEDIUM..REASONING   start COMPLEX
+    verify     SIMPLE..COMPLEX     start SIMPLE
+
+Signals: `long-subtask` (>=6 calls), `multi-file-edit` (>=2 files, implement only),
+`wide-search` (>=4 targets, explore only), `single-small-edit` (<=1 file and <=2 calls, moves
+down), `failure-in-output` (traceback/FAILED in recent tool results, moves up)
+
+No LLM call. Every signal is read from the payload the request already carries, so the
+classifier costs a dict lookup against the ~3s the LLM classifier spends on `moe-router`
+
+## Loader gotcha, cost an outage if it had shipped
+
+`classifier_plugin` resolves through `get_instance_fn`, which is a plain `getattr` on the
+module (`litellm/proxy/types_utils/utils.py:55`). It never instantiates, unlike the guardrail
+loader. A bare class passes `resolve_classifier_plugin`'s `isinstance(resolved, ClassifierPlugin)`
+check because a class satisfies a runtime_checkable Protocol structurally, and
+`inspect.iscoroutinefunction` also passes on the unbound function. So `module.ClassName` boots
+clean and then fails on the first classified request, in production, mid-session
+
+Both modules therefore export a module-level instance and the config points at that:
+`subtask_type_classifier.subtask_type_classifier`, not `...SubtaskTypeClassifier`
 
 Both build on the online phase detector (`subtask_signal.py`, see `subtask_signal.md`). They are
 different experiments and should be separate model names so they stay a clean A/B against
