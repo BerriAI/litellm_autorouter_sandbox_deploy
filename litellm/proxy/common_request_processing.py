@@ -63,6 +63,7 @@ from litellm.proxy.common_utils.sse_keepalive import (
 from litellm.proxy.dd_span_tagger import DDSpanTagger
 from litellm.proxy.guardrails.auto_router_compression import arm_pre_call as _arm_auto_router_compression
 from litellm.proxy.route_llm_request import route_request
+from litellm.proxy.spend_tracking.savings import classifier_cost_from_decision
 from litellm.proxy.utils import ProxyLogging, _check_and_merge_model_level_guardrails
 from litellm.router import Router
 from litellm.router_utils.add_retry_fallback_headers import get_hidden_params_dict
@@ -1407,27 +1408,21 @@ def _get_cost_breakdown_from_logging_obj(
     )
 
 
-def _classifier_cost_from_request_data(request_data: Mapping[str, object] | None) -> float | None:
-    """Cost of the auto-router's LLM classifier call, read from the request's routing_decision.
+def _routing_decision_from_request_data(request_data: Mapping[str, object] | None) -> Mapping[str, object] | None:
+    """The auto-router's routing_decision for this request, if a pre-routing hook recorded one.
 
     The pre-routing hook records the decision in `litellm_metadata` on messages/batch-style
     routes and in `metadata` on chat-style routes, so both buckets are consulted, in the same
     precedence `get_or_create_metadata_bucket` writes them.
     """
-    from litellm.proxy.spend_tracking.savings import classifier_cost_from_decision
-
     data: Final = request_data or {}
     for metadata_key in ("litellm_metadata", "metadata"):
         metadata = data.get(metadata_key)
         if not isinstance(metadata, dict):
             continue
         decision = metadata.get("routing_decision")
-        if not isinstance(decision, dict):
-            continue
-        cost = classifier_cost_from_decision(decision)
-        if cost is None:
-            continue
-        return cost
+        if isinstance(decision, dict):
+            return decision
     return None
 
 
@@ -1606,7 +1601,8 @@ class ProxyBaseLLMRequestProcessing:
                 pass
 
         model_name: Final = ProxyBaseLLMRequestProcessing._get_deployment_model_name(litellm_logging_obj)
-        classifier_cost: Final = _classifier_cost_from_request_data(request_data)
+        routing_decision: Final = _routing_decision_from_request_data(request_data)
+        classifier_cost: Final = classifier_cost_from_decision(routing_decision)
 
         headers: Final = {
             "x-litellm-call-id": call_id,
@@ -1650,6 +1646,8 @@ class ProxyBaseLLMRequestProcessing:
                 str(cost_breakdown.tool_usage_cost) if cost_breakdown.tool_usage_cost is not None else None
             ),
             "x-litellm-classifier-cost": (str(classifier_cost) if classifier_cost is not None else None),
+            "x-litellm-routing-tier": (routing_decision or {}).get("tier"),
+            "x-litellm-routing-cause": (routing_decision or {}).get("cause"),
             "x-litellm-key-tpm-limit": str(user_api_key_dict.tpm_limit),
             "x-litellm-key-rpm-limit": str(user_api_key_dict.rpm_limit),
             "x-litellm-key-max-budget": str(user_api_key_dict.max_budget),

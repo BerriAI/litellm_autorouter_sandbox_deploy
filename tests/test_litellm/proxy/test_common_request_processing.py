@@ -1193,6 +1193,52 @@ class TestProxyBaseLLMRequestProcessing:
 
         assert "x-litellm-classifier-cost" not in headers
 
+    @pytest.mark.parametrize("metadata_key", ["metadata", "litellm_metadata"])
+    def test_get_custom_headers_routing_tier_and_cause_from_routing_decision(self, metadata_key):
+        """An auto-router's tier and cause must surface as their own headers, from
+        either metadata bucket, so a caller can see what routed a request without
+        reading debug logs or a persisted spend log row."""
+        mock_user_api_key_dict = MagicMock(spec=UserAPIKeyAuth)
+        mock_user_api_key_dict.tpm_limit = None
+        mock_user_api_key_dict.rpm_limit = None
+        mock_user_api_key_dict.max_budget = None
+        mock_user_api_key_dict.spend = 0
+
+        headers = ProxyBaseLLMRequestProcessing.get_custom_headers(
+            user_api_key_dict=mock_user_api_key_dict,
+            response_cost=0.00023,
+            request_data={
+                metadata_key: {
+                    "routing_decision": {"cause": "llm_classifier", "tier": "COMPLEX"},
+                }
+            },
+        )
+
+        assert headers["x-litellm-routing-tier"] == "COMPLEX"
+        assert headers["x-litellm-routing-cause"] == "llm_classifier"
+
+    @pytest.mark.parametrize(
+        "request_data",
+        [None, {}, {"metadata": {}}, {"metadata": {"routing_decision": {}}}],
+    )
+    def test_get_custom_headers_omits_routing_tier_and_cause_without_a_decision(self, request_data):
+        """No routing decision, or one missing tier/cause, must omit those headers
+        entirely rather than emit the literal string "None"."""
+        mock_user_api_key_dict = MagicMock(spec=UserAPIKeyAuth)
+        mock_user_api_key_dict.tpm_limit = None
+        mock_user_api_key_dict.rpm_limit = None
+        mock_user_api_key_dict.max_budget = None
+        mock_user_api_key_dict.spend = 0
+
+        headers = ProxyBaseLLMRequestProcessing.get_custom_headers(
+            user_api_key_dict=mock_user_api_key_dict,
+            response_cost=0.00023,
+            request_data=request_data,
+        )
+
+        assert "x-litellm-routing-tier" not in headers
+        assert "x-litellm-routing-cause" not in headers
+
     def test_get_cost_breakdown_from_logging_obj_helper(self):
         """
         Test the helper function that extracts cost breakdown information.
