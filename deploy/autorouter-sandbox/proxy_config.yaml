@@ -73,6 +73,32 @@ model_list:
           REASONING:
             - anthropic/claude-fable-5-1
 
+  - model_name: moe-phase-difficulty-router
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_default_model: anthropic/claude-opus-5
+      complexity_router_config:
+        classifier_type: custom
+        classifier_plugin: phase_difficulty_classifier.PhaseDifficultyClassifier
+        classifier_plugin_timeout_ms: 500
+        classifier_fallback: default_model
+        classification_mode: every_request
+        deployment_affinity: true
+        session_affinity: false
+        escalation_keywords:
+          - LITELLM ESCALATE
+        tiers:
+          SIMPLE:
+            - anthropic/claude-haiku-4-5
+          MEDIUM:
+            - anthropic/claude-sonnet-5
+          COMPLEX:
+            - model_name: anthropic/claude-opus-5
+              litellm_params:
+                reasoning_effort: high
+          REASONING:
+            - anthropic/claude-fable-5-1
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 
