@@ -1,6 +1,38 @@
 # Experiment 2 (signal only): subtask boundary detection from tool-call composition
 
-Status: signal built and demoed (`subtask_signal.py`), not wired into any router
+Status: signal built and demoed online (`subtask_signal.py`), not wired into any router
+
+## Online, not post hoc
+
+The first version of this only worked in retrospect: it took a complete trace and ran
+`itertools.groupby` over it, which needs to see a run end before it can report the run. That is
+useless for routing, which has to decide during the request
+
+The live path turned out not to need session persistence at all. Claude Code resends the full
+message history on every request, and at turn N that history contains only turns 1..N, so
+reading it is causal by construction; there is no future in the payload to accidentally peek at.
+`extract_tool_calls` reads the wire format (`assistant` turns carrying a `tool_calls` array)
+directly, and `current_phase(messages)` recomputes the phase from scratch per request. Every
+request is a cold start that happens to already contain its own history. `advance()` is the
+actual online step: it confirms a run the moment it reaches `debounce` length, never waiting to
+see what follows
+
+Demoed both ways in `main()`: a message-by-message live path over wire-shaped messages, and a
+full replay of the session trace comparing online against post hoc
+
+## Online and post hoc agree exactly
+
+13 boundaries each, identical positions, mean detection lag 1.00 calls, zero disagreement
+
+This is forced by the algorithm, not luck. `groupby` looked like it needed the future because it
+waits for a run to finish before reporting its length, but "has this run reached 2 calls yet" is
+knowable the instant the second call arrives, and nothing later in the trace changes that fact.
+A run-length debounce was always computable online; the batch version was a lazier way to compute
+the same answer, not a better-informed one
+
+So real time costs nothing in accuracy against this baseline. What it costs is different: the
+answer has to be produced inside one request's latency budget, recomputed from scratch each time,
+with no ability to revise a call already routed on
 
 ## Scope
 

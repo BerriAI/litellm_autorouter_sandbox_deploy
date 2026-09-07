@@ -15,10 +15,10 @@ is a separate, later question.
 from __future__ import annotations
 
 import itertools
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Final
+from typing import Any, Final
 
 
 class Phase(str, Enum):
@@ -139,6 +139,101 @@ def detect_boundaries(classified: Sequence[ClassifiedCall], debounce: int = 2) -
     return _confirm_boundaries(_phase_runs(classified), debounce)
 
 
+@dataclass(frozen=True, slots=True)
+class OnlineState:
+    """Everything the online detector needs to carry between calls. Small and picklable on
+    purpose: it has to survive between two HTTP requests."""
+
+    confirmed: Phase | None = None
+    pending: Phase | None = None
+    pending_run: int = 0
+    seen: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class OnlineBoundary:
+    started_at: int
+    detected_at: int
+    from_phase: Phase | None
+    to_phase: Phase
+
+    @property
+    def lag(self) -> int:
+        return self.detected_at - self.started_at
+
+
+def advance(state: OnlineState, phase: Phase, debounce: int = 2) -> tuple[OnlineState, OnlineBoundary | None]:
+    """Feed one tool call. Returns the next state and a boundary if this call confirmed one.
+
+    Unlike `detect_boundaries`, this never looks at a call it has not seen: a run is confirmed
+    the moment it reaches `debounce` length, not once the following run reveals it ended. That
+    is the whole difference between deciding live and explaining afterwards, and it is why the
+    two disagree.
+    """
+    index: Final = state.seen
+    if state.confirmed is None:
+        return (
+            OnlineState(confirmed=phase, seen=index + 1),
+            OnlineBoundary(started_at=index, detected_at=index, from_phase=None, to_phase=phase),
+        )
+
+    if phase == state.confirmed:
+        return OnlineState(confirmed=state.confirmed, seen=index + 1), None
+
+    run: Final = state.pending_run + 1 if phase == state.pending else 1
+    if run >= debounce:
+        return (
+            OnlineState(confirmed=phase, seen=index + 1),
+            OnlineBoundary(
+                started_at=index - run + 1,
+                detected_at=index,
+                from_phase=state.confirmed,
+                to_phase=phase,
+            ),
+        )
+    return OnlineState(confirmed=state.confirmed, pending=phase, pending_run=run, seen=index + 1), None
+
+
+def replay_online(trace: Sequence[ToolCall], debounce: int = 2) -> tuple[OnlineBoundary, ...]:
+    """Feed a trace through `advance` one call at a time, exactly as the live path would."""
+    state = OnlineState()  # rebind-ok: fold over the trace, each step depends on the previous
+    events: list[OnlineBoundary] = []  # mutable-ok: append-only accumulator over one forward pass
+    for call in trace:
+        state, boundary = advance(state, classify_tool_call(call), debounce)
+        if boundary is not None:
+            events.append(boundary)
+    return tuple(events)
+
+
+def extract_tool_calls(messages: Sequence[Mapping[str, Any]]) -> tuple[ToolCall, ...]:
+    """Pull the tool-call trace out of an in-flight request's message history.
+
+    This is what makes the live path stateless: Claude Code resends the full history every
+    turn, and at turn N that history contains only turns 1..N, so reading it is causal by
+    construction. Nothing needs to be persisted between requests.
+    """
+    return tuple(
+        ToolCall(name=name, detail=str(function.get("arguments", "")))
+        for message in messages
+        if message.get("role") == "assistant"
+        for tool_call in (message.get("tool_calls") or ())
+        if isinstance(tool_call, dict)
+        for function in (tool_call.get("function"),)
+        if isinstance(function, dict)
+        for name in (function.get("name"),)
+        if isinstance(name, str)
+    )
+
+
+def current_phase(messages: Sequence[Mapping[str, Any]], debounce: int = 2) -> tuple[Phase | None, OnlineBoundary | None]:
+    """The live entry point: current confirmed phase for an in-flight request, plus the most
+    recent boundary if there is one. A router would key its tier decision off the phase."""
+    boundaries: Final = replay_online(extract_tool_calls(messages), debounce)
+    if not boundaries:
+        return None, None
+    return boundaries[-1].to_phase, boundaries[-1]
+
+
 def render_timeline(classified: Sequence[ClassifiedCall], boundaries: Sequence[BoundaryEvent]) -> str:
     boundary_at: Final = {b.index: b for b in boundaries}
     lines: list[str] = []  # mutable-ok: built once by a single forward scan
@@ -225,11 +320,79 @@ _THIS_SESSION_TRACE: Final = (
 )
 
 
+def _wire_message(role: str, tool_name: str | None = None, arguments: str = "") -> dict[str, Any]:
+    """One synthetic chat-completions message, shaped like what a real request carries: an
+    assistant turn with a `tool_calls` array, or the `tool` role reply that follows it."""
+    if tool_name is None:
+        return {"role": role, "content": ""}
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"id": "call_0", "type": "function", "function": {"name": tool_name, "arguments": arguments}}],
+    }
+
+
+_WIRE_TRACE: Final = (
+    _wire_message("user"),
+    _wire_message("assistant", "Read", '{"file_path": "foo.py"}'),
+    _wire_message("tool"),
+    _wire_message("assistant", "Grep", '{"pattern": "def foo"}'),
+    _wire_message("tool"),
+    _wire_message("assistant", "Edit", '{"file_path": "foo.py"}'),
+    _wire_message("tool"),
+    _wire_message("assistant", "Edit", '{"file_path": "foo.py"}'),
+    _wire_message("tool"),
+)
+
+
+def _demo_live_path() -> None:
+    """Simulates what the guardrail's pre_call hook actually sees: at request N, only turns
+    1..N exist, because Claude Code resends the whole history every turn. No hand-labeled
+    ToolCall list, no persisted state -- extract_tool_calls reads the wire format directly,
+    and current_phase is recomputed fresh from whatever prefix of history the request carries."""
+    print("=== LIVE PATH: recomputed fresh from the request's own message history ===\n")
+    previous_calls = 0
+    for n in range(1, len(_WIRE_TRACE) + 1):
+        prefix = _WIRE_TRACE[:n]
+        call_count = len(extract_tool_calls(prefix))
+        phase, boundary = current_phase(prefix)
+        tag = f"-> {phase.value}" if phase else "(no confirmed phase yet)"
+        if boundary is not None and call_count > previous_calls and boundary.detected_at == call_count - 1:
+            tag += "  <== just confirmed this call"
+        print(f"request with {n:>2} messages so far: {tag}")
+        previous_calls = call_count
+    print()
+
+
 def main() -> None:
-    classified = classify_trace(_THIS_SESSION_TRACE)
-    boundaries = detect_boundaries(classified, debounce=2)
-    print(render_timeline(classified, boundaries))
-    print(f"\n{len(classified)} tool calls, {len(boundaries)} confirmed subtask boundaries")
+    _demo_live_path()
+    classified: Final = classify_trace(_THIS_SESSION_TRACE)
+    online: Final = replay_online(_THIS_SESSION_TRACE, debounce=2)
+    posthoc: Final = detect_boundaries(classified, debounce=2)
+
+    print("=== ONLINE (decided live, one call at a time, no lookahead) ===\n")
+    detected_at: Final = {b.detected_at: b for b in online}
+    for i, c in enumerate(classified):
+        marker = ""
+        if i in detected_at:
+            b = detected_at[i]
+            origin = b.from_phase.value if b.from_phase else "start"
+            marker = f"   <== BOUNDARY {origin} -> {b.to_phase.value} (began at [{b.started_at}], lag {b.lag})"
+        print(f"[{i:>3}] {c.phase.value:<9} {c.call.name}{marker}")
+
+    print(f"\n{len(classified)} tool calls")
+    print(f"online:  {len(online)} boundaries")
+    print(f"posthoc: {len(posthoc)} boundaries")
+
+    online_starts: Final = {b.started_at for b in online}
+    posthoc_starts: Final = {b.index for b in posthoc}
+    print(f"\nagreed on:      {sorted(online_starts & posthoc_starts)}")
+    print(f"online only:    {sorted(online_starts - posthoc_starts)}")
+    print(f"posthoc only:   {sorted(posthoc_starts - online_starts)}")
+
+    lags: Final = tuple(b.lag for b in online if b.from_phase is not None)
+    if lags:
+        print(f"\ndetection lag: min {min(lags)}, max {max(lags)}, mean {sum(lags) / len(lags):.2f} calls")
 
 
 if __name__ == "__main__":
