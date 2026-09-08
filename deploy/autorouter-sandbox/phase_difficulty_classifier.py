@@ -51,9 +51,15 @@ _LADDER: Final = (
 )
 
 # (floor, start, ceiling) as ladder indices.
+# implement starts at MEDIUM (Sonnet), not COMPLEX: starting at COMPLEX meant every implement
+# subtask got Opus by default with no evidence required, and the sensitivity dial could only
+# push it further up to REASONING, never down. So the router "always chose Opus" for edits
+# regardless of how trivial they were, which is not a difficulty decision at all. Now every
+# phase starts at its floor and has to earn a higher tier from observed evidence, which is what
+# the other two phases already did.
 _PHASE_BAND: Final = {
     Phase.EXPLORE: (0, 0, 1),
-    Phase.IMPLEMENT: (1, 2, 3),
+    Phase.IMPLEMENT: (1, 1, 3),
     Phase.VERIFY: (0, 0, 2),
 }
 

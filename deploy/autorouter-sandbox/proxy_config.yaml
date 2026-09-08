@@ -113,7 +113,10 @@ model_list:
   - model_name: moe-subtask-type-router
     litellm_params:
       model: auto_router/complexity_router
-      complexity_router_default_model: anthropic/claude-opus-5
+      # Sonnet, not Opus: this is where turns land before a phase is confirmed (the opening
+      # turn of every session, plus any turn the classifier declines), so an Opus default
+      # meant a large share of traffic never reflected a routing decision at all.
+      complexity_router_default_model: anthropic/claude-sonnet-5
       complexity_router_config:
         classifier_type: custom
         classifier_plugin: subtask_type_classifier.subtask_type_classifier
@@ -130,11 +133,11 @@ model_list:
           # verify: parsing test output, wants fast and cheap over smart
           MEDIUM:
             - anthropic/claude-haiku-4-5
-          # implement: the one phase where a wrong answer is expensive
+          # implement: editing code. Sonnet rather than Opus: "this is an edit" is not by
+          # itself a reason for the most expensive model, and this router has no difficulty
+          # signal to justify one (that is what moe-subtask-difficulty-router is for).
           COMPLEX:
-            - model_name: anthropic/claude-opus-5
-              litellm_params:
-                reasoning_effort: high
+            - anthropic/claude-sonnet-5
           # unused by this classifier; kept so manual LITELLM ESCALATE has somewhere to go
           REASONING:
             - anthropic/claude-fable-5-1

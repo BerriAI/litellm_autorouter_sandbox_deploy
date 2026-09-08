@@ -64,6 +64,9 @@ _EXPLORE_TOOLS: Final = frozenset(
 )
 _IMPLEMENT_TOOLS: Final = frozenset({"Write", "Edit", "NotebookEdit"})
 
+_EXPLORE_TOOLS_LOWER: Final = frozenset(name.lower() for name in _EXPLORE_TOOLS)
+_IMPLEMENT_TOOLS_LOWER: Final = frozenset(name.lower() for name in _IMPLEMENT_TOOLS)
+
 _SHIP_KEYWORDS: Final = ("git commit", "git push", "git add")
 _VERIFY_KEYWORDS: Final = (
     "curl ",
@@ -74,21 +77,75 @@ _VERIFY_KEYWORDS: Final = (
     "uvicorn",
     "health/liveliness",
     "npm ci",
+    "python -m pytest",
+    "python -m unittest",
+    "tox",
+    "./runtests.py",
+    "bin/test",
+    "make test",
 )
-_EXPLORE_BASH_KEYWORDS: Final = ("grep ", "find ", " ls ", "cat ", "sed -n", "python3 -c")
+# Checked before the explore keywords: a shell edit is usually spelled with redirection or an
+# in-place sed, and those commands routinely also contain `cat` or `sed`, which would otherwise
+# read as exploration. Ordering, not more specific patterns, is what keeps them apart.
+_IMPLEMENT_BASH_KEYWORDS: Final = (
+    "sed -i",
+    "> ",
+    ">> ",
+    "tee ",
+    "patch ",
+    "git apply",
+    "git checkout --",
+    "cat <<",
+    "cat >",
+    'python -c "open(',
+    'python3 -c "open(',
+    "write_text(",
+    ".write(",
+    "mv ",
+    "cp ",
+    "rm ",
+    "mkdir ",
+    "touch ",
+)
+_EXPLORE_BASH_KEYWORDS: Final = (
+    "grep ",
+    "find ",
+    " ls ",
+    "cat ",
+    "sed -n",
+    "python3 -c",
+    "python -c",
+    "head ",
+    "tail ",
+    "rg ",
+    "git diff",
+    "git log",
+    "git status",
+)
+
+# Shell-ish tool names across harnesses: Claude Code sends "Bash", mini-swe-agent sends "bash",
+# others use "shell"/"run"/"terminal". Same alias set trajectory_signals resolves to "execute".
+_SHELL_TOOL_NAMES: Final = frozenset({"bash", "shell", "run", "exec", "execute", "command", "terminal"})
 
 
 def classify_tool_call(call: ToolCall) -> Phase:
-    if call.name in _EXPLORE_TOOLS:
+    """Tool names are matched case-insensitively: harnesses disagree on capitalization
+    ("Bash" vs "bash"), and an exact-match miss silently yields OTHER, which is
+    indistinguishable from "no phase signal" and so routes the whole session to the fallback
+    model without any error."""
+    name: Final = call.name.lower()
+    if name in _EXPLORE_TOOLS_LOWER:
         return Phase.EXPLORE
-    if call.name in _IMPLEMENT_TOOLS:
+    if name in _IMPLEMENT_TOOLS_LOWER:
         return Phase.IMPLEMENT
-    if call.name != "Bash":
+    if name not in _SHELL_TOOL_NAMES:
         return Phase.OTHER
 
     detail: Final = call.detail.lower()
     if any(kw in detail for kw in _SHIP_KEYWORDS):
         return Phase.OTHER
+    if any(kw in detail for kw in _IMPLEMENT_BASH_KEYWORDS):
+        return Phase.IMPLEMENT
     if any(kw in detail for kw in _VERIFY_KEYWORDS):
         return Phase.VERIFY
     if any(kw in detail for kw in _EXPLORE_BASH_KEYWORDS):

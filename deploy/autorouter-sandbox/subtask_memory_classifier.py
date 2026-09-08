@@ -42,7 +42,7 @@ _TierName = Literal["SIMPLE", "MEDIUM", "COMPLEX", "REASONING"]
 
 _PHASE_BAND_DESCRIPTION: Final = {
     Phase.EXPLORE: "explore work (reading/searching). Usually SIMPLE or MEDIUM; never COMPLEX or REASONING.",
-    Phase.IMPLEMENT: "implement work (editing code). Usually MEDIUM or COMPLEX; REASONING only if genuinely stuck or the change is architecturally risky.",
+    Phase.IMPLEMENT: "implement work (editing code). Default to MEDIUM; pick COMPLEX only when the edit is genuinely non-trivial (multi-file, subtle logic, or the trajectory shows trouble), and REASONING only if genuinely stuck or architecturally risky. Do not treat 'this is an edit' as sufficient reason for a high tier.",
     Phase.VERIFY: "verify work (running/reading test or build output). Usually SIMPLE; COMPLEX only if failures need real diagnosis.",
 }
 
