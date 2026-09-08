@@ -9,6 +9,11 @@ COPY litellm-proxy-extras/litellm_proxy_extras/ ${SITE_PACKAGES}/litellm_proxy_e
 COPY litellm-proxy-extras/ /app/litellm-proxy-extras/
 COPY schema.prisma /app/schema.prisma
 COPY deploy/autorouter-sandbox/proxy_config.yaml /app/config.yaml
-COPY deploy/autorouter-sandbox/memory_guardrail.py /app/memory_guardrail.py
+# Every module the config resolves by dotted path must sit next to config.yaml, since
+# get_instance_fn looks relative to the config file's directory. Copying the directory
+# wholesale rather than naming files individually: the previous per-file list silently went
+# stale every time an experiment added a module, and the failure only shows up at deploy time
+# as "Could not import X from X", never locally (where the repo dir already has everything).
+COPY deploy/autorouter-sandbox/*.py /app/
 
 CMD ["--config", "/app/config.yaml", "--port", "4000"]
