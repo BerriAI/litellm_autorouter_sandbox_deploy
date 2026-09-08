@@ -1,12 +1,20 @@
 guardrails:
+  # embedding_model runs on the hot path (retrieval), so it must be fast.
+  # extraction_model runs in the background after the response is already streaming, so it
+  # can be slower and stronger. Same split as subtask-memory, so a 1-vs-5 comparison isolates
+  # ask-scoped vs subtask-scoped rather than also comparing different retrieval/extraction models.
   - guardrail_name: memory-learnings
     litellm_params:
       guardrail: memory_guardrail.MemoryGuardrail
       mode: pre_call
+      embedding_model: openai/text-embedding-3-small
+      extraction_model: anthropic/claude-sonnet-5
   - guardrail_name: memory-learnings
     litellm_params:
       guardrail: memory_guardrail.MemoryGuardrail
       mode: post_call
+      embedding_model: openai/text-embedding-3-small
+      extraction_model: anthropic/claude-sonnet-5
   # Test-only: prefixes every reply with [MODEL_NAME]. Never touches the request, never
   # affects inference or tool calls, response text only. default_on runs it for every
   # request regardless of which router served it, so it is not attached per-router below.

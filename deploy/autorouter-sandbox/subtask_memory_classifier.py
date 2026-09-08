@@ -101,9 +101,12 @@ class SubtaskMemoryClassifier:
 
             memory_line: Final = (
                 f"{match_count} past learning(s) matched this subtask, top cosine similarity "
-                f"{similarity:.2f}, and their procedures are ALREADY injected into the model's "
-                f"prompt for this turn. Above ~0.6 that is a close match, so a cheaper tier is "
-                f"reasonable; below ~0.45 treat it as weak and ignore it."
+                f"{similarity:.2f} (retrieval's own cutoff is 0.25; a live check against this "
+                f"embedding model found related technical text scoring 0.29-0.58 and unrelated "
+                f"text 0.06-0.15, so treat similarity as a rough signal, not a precise one), and "
+                f"their procedures are ALREADY injected into the model's prompt for this turn. "
+                f"Weigh it down toward a cheaper tier only alongside the actual tool activity "
+                f"below looking clean, not on the number alone."
                 if match_count
                 else "No past learnings matched this subtask; nothing was injected."
             )

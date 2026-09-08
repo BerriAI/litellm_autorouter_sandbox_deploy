@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -49,7 +48,8 @@ from litellm.utils import token_counter
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from subtask_signal import (  # noqa: E402  # needs the sys.path insert above
+from learning_retrieval import cosine, rank_candidates  # noqa: E402  # needs the sys.path insert above
+from subtask_signal import (  # noqa: E402  # same reason
     Phase,
     ToolCall,
     extract_tool_calls,
@@ -67,7 +67,6 @@ _DEFAULT_EMBEDDING_TIMEOUT_MS: Final = 2000
 _DEFAULT_EXTRACTION_TIMEOUT_MS: Final = 30000
 
 _MAX_CANDIDATES: Final = 3
-_MIN_SIMILARITY: Final = 0.35
 _MIN_CALLS_TO_LEARN: Final = 2
 _RESULT_CHARS_SHOWN: Final = 400
 
@@ -83,13 +82,6 @@ class _Learning(BaseModel):
         description="False if this subtask was trivial, failed, or teaches nothing reusable. "
         "Be strict: a store full of noise is worse than an empty one."
     )
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    dot: Final = sum(x * y for x, y in zip(a, b))
-    na: Final = math.sqrt(sum(x * x for x in a))
-    nb: Final = math.sqrt(sum(x * x for x in b))
-    return dot / (na * nb) if na and nb else 0.0
 
 
 def _subtask_text(calls: tuple[ToolCall, ...], phase: Phase) -> str:
@@ -253,7 +245,8 @@ class SubtaskMemoryGuardrail(CustomGuardrail):
             return None
 
     async def _retrieve(self, query: str) -> list[tuple[float, str]]:
-        """Cosine-ranked learnings above `_MIN_SIMILARITY`, best first.
+        """Top learnings, best first: see learning_retrieval.rank_candidates for the ranking
+        rule (a noise floor plus a gap below the best hit, not a single fixed cutoff).
 
         Vectors are stored alongside each learning at write time, so retrieval costs exactly
         one embedding call regardless of how many learnings exist.
@@ -261,17 +254,15 @@ class SubtaskMemoryGuardrail(CustomGuardrail):
         query_vector: Final = await self._embed(query)
         if query_vector is None:
             return []
-        scored: list[tuple[float, str]] = []  # mutable-ok: append-only, sorted once below
+        scored: list[tuple[float, str]] = []  # mutable-ok: append-only, ranked once below
         for path in self.store_dir.glob("*.json"):
             try:
                 record = json.loads(path.read_text(encoding="utf-8"))
-                score = _cosine(query_vector, record["vector"])
+                score = cosine(query_vector, record["vector"])
             except (OSError, json.JSONDecodeError, KeyError, TypeError):
                 continue
-            if score >= _MIN_SIMILARITY:
-                scored.append((score, record["text"]))
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return scored[:_MAX_CANDIDATES]
+            scored.append((score, record["text"]))
+        return rank_candidates(scored, limit=_MAX_CANDIDATES)
 
     def _inject(
         self, messages: list[dict[str, Any]], learnings: tuple[str, ...]
