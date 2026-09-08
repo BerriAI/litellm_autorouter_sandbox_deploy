@@ -28,6 +28,8 @@ services:
         generateValue: true
       - key: MEMORY_STORE_DIR
         value: /var/data/memory
+      - key: SUBTASK_MEMORY_STORE_DIR
+        value: /var/data/subtask_memory
       - key: DATABASE_URL
         fromDatabase:
           name: autorouter-sandbox-db

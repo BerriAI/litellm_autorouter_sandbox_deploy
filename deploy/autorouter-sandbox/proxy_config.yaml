@@ -17,6 +17,22 @@ guardrails:
       guardrail: model_tag_guardrail.ModelTagGuardrail
       mode: post_call
       default_on: true
+  # Experiment 5: learning scoped to subtasks rather than to the whole ask.
+  # embedding_model runs on the hot path (retrieval), so it must be fast.
+  # extraction_model runs in the background after the response is already streaming, so it
+  # can be slower and stronger.
+  - guardrail_name: subtask-memory
+    litellm_params:
+      guardrail: subtask_memory_guardrail.SubtaskMemoryGuardrail
+      mode: pre_call
+      embedding_model: openai/text-embedding-3-small
+      extraction_model: anthropic/claude-sonnet-5
+  - guardrail_name: subtask-memory
+    litellm_params:
+      guardrail: subtask_memory_guardrail.SubtaskMemoryGuardrail
+      mode: post_call
+      embedding_model: openai/text-embedding-3-small
+      extraction_model: anthropic/claude-sonnet-5
 
 model_list:
   - model_name: "*"
@@ -124,6 +140,38 @@ model_list:
       complexity_router_config:
         classifier_type: custom
         classifier_plugin: phase_difficulty_classifier.phase_difficulty_classifier
+        classifier_plugin_timeout_ms: 500
+        classifier_fallback: default_model
+        deployment_affinity: true
+        session_affinity: false
+        escalation_keywords:
+          - LITELLM ESCALATE
+        tiers:
+          SIMPLE:
+            - anthropic/claude-haiku-4-5
+          MEDIUM:
+            - anthropic/claude-sonnet-5
+          COMPLEX:
+            - model_name: anthropic/claude-opus-5
+              litellm_params:
+                reasoning_effort: high
+          REASONING:
+            - anthropic/claude-fable-5-1
+
+  # Experiment 5: subtask-scoped learning. Combines experiment 2 (subtask boundaries) with
+  # experiment 1 (learned coverage): learnings are extracted per completed subtask and
+  # retrieved by what the CURRENT subtask is doing, rather than by the session's opening ask.
+  # The guardrail writes coverage into request metadata; the classifier reads it on the same
+  # request and discounts the tier when the work is already covered.
+  - model_name: moe-subtask-memory-router
+    litellm_params:
+      model: auto_router/complexity_router
+      guardrails:
+        - subtask-memory
+      complexity_router_default_model: anthropic/claude-opus-5
+      complexity_router_config:
+        classifier_type: custom
+        classifier_plugin: subtask_memory_classifier.subtask_memory_classifier
         classifier_plugin_timeout_ms: 500
         classifier_fallback: default_model
         deployment_affinity: true
