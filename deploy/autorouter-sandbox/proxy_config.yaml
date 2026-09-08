@@ -7,6 +7,16 @@ guardrails:
     litellm_params:
       guardrail: memory_guardrail.MemoryGuardrail
       mode: post_call
+  # Test-only: prefixes every reply with [MODEL_NAME]. Never touches the request, never
+  # affects inference or tool calls, response text only. default_on runs it for every
+  # request regardless of which router served it, so it is not attached per-router below.
+  # Strip this block once you're past manual testing, since it puts a literal string into
+  # every reply a real client would see clean.
+  - guardrail_name: model-tag
+    litellm_params:
+      guardrail: model_tag_guardrail.ModelTagGuardrail
+      mode: post_call
+      default_on: true
 
 model_list:
   - model_name: "*"
