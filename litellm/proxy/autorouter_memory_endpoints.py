@@ -8,6 +8,7 @@ experiment has no storage abstraction yet and should not grow one before it is w
 """
 
 import html
+import json
 import os
 from pathlib import Path
 from typing import Annotated, Final
@@ -28,17 +29,19 @@ def _store_dir() -> Path:
 
 
 def _read_learnings() -> tuple[tuple[str, str], ...]:
-    """(name, content) newest first. Unreadable files are skipped rather than failing
-    the whole listing, since one bad file should not hide the rest."""
+    """(name, text) newest first. Unreadable or malformed files are skipped rather than
+    failing the whole listing, since one bad file should not hide the rest. The vector is
+    left out: it is retrieval plumbing, not something worth reading."""
     store: Final = _store_dir()
     if not store.exists():
         return ()
 
     entries: list[tuple[str, str]] = []
-    for path in sorted(store.glob("*.md"), reverse=True)[:_MAX_LEARNINGS]:
+    for path in sorted(store.glob("*.json"), reverse=True)[:_MAX_LEARNINGS]:
         try:
-            entries.append((path.name, path.read_text(encoding="utf-8")))
-        except OSError:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            entries.append((path.name, record["text"]))
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
             continue
     return tuple(entries)
 
@@ -90,7 +93,7 @@ async def clear_learnings(
         return {"deleted": 0}
 
     deleted = 0
-    for path in store.glob("*.md"):
+    for path in store.glob("*.json"):
         try:
             path.unlink()
             deleted += 1
