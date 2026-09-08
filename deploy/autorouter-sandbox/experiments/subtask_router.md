@@ -130,6 +130,43 @@ Gateway model availability. `/v1/models` endpoint confirmed it only serves `moe-
 not enumerate frontier models, and experiment 3 needs upstream to add non-Anthropic models to
 its config first. Not a router problem, just a prerequisite
 
+## Difficulty scoring rebuilt on observed evidence, not invented thresholds
+
+The first build scored call-count and file-count thresholds (>=6 calls, >=4 targets, >=2
+files) that were guesses about what correlates with difficulty, no different in kind from the
+unvalidated constants already in this repo's own `complexity_router` and `adaptive_router`.
+Researched how OSS routers (RouteLLM, RoRF, FrugalGPT, AutoMix, Switchyard, MetaLLM,
+vllm-project's semantic-router) actually calibrate: none of them defends a raw threshold. They
+either learn a score from labeled preference data and set the cutoff by quantile over their
+own distribution (RouteLLM, RoRF), or score the answer's observed outcome rather than the
+prompt (FrugalGPT, AutoMix), or start with no threshold and learn one online (MetaLLM,
+vllm-project's bandit; this repo's own `adaptive_router` is the same pattern).
+
+Rebuilt against `trajectory_signals.py`, vendored unmodified from BerriAI/litellm PR #39976
+(observe-only, not yet merged): `error_severity` and `spinning`, fractions over the recent
+tool-call window, are observations of task state (a call actually erroring, actually
+repeating) rather than proxies for it. The five invented constants collapse into one dial,
+`difficulty_sensitivity` in [0, 1]: tier moves up one step when
+`error_severity + spinning >= (1 - sensitivity)`. Provisional default 0.5, deliberately not
+tuned, see "Calibrating the sensitivity dial" below.
+
+**A real bug this rebuild caught, not cosmetic.** `subtask_signal.extract_tool_calls` only ever
+parsed chat-completions `tool_calls` entries. Claude Code can send Anthropic Messages shape
+(`content: [{type: "tool_use"}]` / `{type: "tool_result"}`), which the extractor silently
+returned zero calls for, meaning no phase was ever detected on that shape and both subtask
+routers fell through to `default_model` (Opus) instead of classifying. `trajectory_signals.py`
+already parses both shapes correctly (`iter_tool_call_events_newest_first`), so
+`extract_tool_calls` now delegates to it instead of maintaining a second, incomplete parser.
+Verified live against the real gateway, both wire shapes, both subtask routers.
+
+## Calibrating the sensitivity dial
+
+Not done yet. The plan, following the RouteLLM/FrugalGPT pattern: merge #39976 (or keep the
+vendored copy running) so `moe-router` and `moe-learning-router` record `error_severity` and
+`spinning` into spend logs at zero routing risk, run a day of real traffic, then set
+`difficulty_sensitivity` from the actual observed distribution rather than a guess. 0.5 is a
+placeholder to make the router usable today, not a calibrated value.
+
 ## Model picks for experiment 4 (per-subtask difficulty)
 
 Keeping built-in tiers, so these are all Anthropic. Data from Artificial Analysis Intelligence

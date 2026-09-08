@@ -228,23 +228,23 @@ def replay_online(trace: Sequence[ToolCall], debounce: int = 2, skip_neutral: bo
 
 
 def extract_tool_calls(messages: Sequence[Mapping[str, Any]]) -> tuple[ToolCall, ...]:
-    """Pull the tool-call trace out of an in-flight request's message history.
+    """Pull the tool-call trace out of an in-flight request's message history, oldest first.
 
     This is what makes the live path stateless: Claude Code resends the full history every
     turn, and at turn N that history contains only turns 1..N, so reading it is causal by
     construction. Nothing needs to be persisted between requests.
+
+    Delegates to trajectory_signals.iter_tool_call_events_newest_first, which reads both wire
+    shapes a request can carry: chat-completions `tool_calls` entries and Anthropic Messages
+    `tool_use` content blocks. This module used to parse only the former, which silently
+    produced zero tool calls -- and so no phase, ever -- against the Anthropic Messages shape
+    Claude Code actually sends through this gateway. Caught by testing against the real shape
+    rather than only the one this module happened to be written against.
     """
-    return tuple(
-        ToolCall(name=name, detail=str(function.get("arguments", "")))
-        for message in messages
-        if message.get("role") == "assistant"
-        for tool_call in (message.get("tool_calls") or ())
-        if isinstance(tool_call, dict)
-        for function in (tool_call.get("function"),)
-        if isinstance(function, dict)
-        for name in (function.get("name"),)
-        if isinstance(name, str)
-    )
+    from trajectory_signals import iter_tool_call_events_newest_first
+
+    newest_first: Final = tuple(iter_tool_call_events_newest_first(messages))
+    return tuple(ToolCall(name=event.signature[0], detail=event.signature[1]) for event in reversed(newest_first))
 
 
 def current_phase(messages: Sequence[Mapping[str, Any]], debounce: int = 2) -> tuple[Phase | None, OnlineBoundary | None]:
