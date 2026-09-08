@@ -52,6 +52,14 @@ class _DifficultyVerdict(BaseModel):
     reasoning: str = Field(description="One sentence: why this tier, referencing what you actually saw.")
 
 
+# With `from __future__ import annotations`, `tier: _TierName` is stored as the string
+# "_TierName" and pydantic normally resolves it lazily on first use. litellm.acompletion's own
+# response_format introspection was hitting this from a context where that lazy resolution
+# hadn't happened yet, raising "_DifficultyVerdict is not fully defined". Forcing it here,
+# right after the class body, removes the timing dependency entirely.
+_DifficultyVerdict.model_rebuild()
+
+
 def _recent_tool_summary(messages: list[dict]) -> str:
     """Plain-text summary of the last few tool calls and their results, for the judge prompt.
     Reads both wire shapes directly rather than importing trajectory_signals, since this only
